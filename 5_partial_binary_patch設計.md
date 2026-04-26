@@ -1,9 +1,10 @@
-では **Phase5：partial binary patch 設計** に入る。
-ここが最終目的に一番近い。
+# Phase 5: Partial Binary Patch 設計
 
-# Phase5のゴール
+---
 
-最終的に作りたいのはこれ：
+## Phase5のゴール
+
+最終的に作るのはこれ：
 
 ```text
 bufferの中の、指定されたフィールドだけを、安全に差し替える仕組み
@@ -19,15 +20,11 @@ buffer + layout + patch request
 
 ---
 
-# 1. partial binary patch とは何か
+## 1. partial binary patch とは何か
 
-直訳すると：
+直訳すると「バイナリデータの部分差し替え」。
 
-```text
-バイナリデータの部分差し替え
-```
-
-あなたの現場問題に置き換えると：
+具体的な問題に当てはめると：
 
 ```text
 読み込んだ生データ buffer のうち、
@@ -35,13 +32,11 @@ buffer + layout + patch request
 一部フィールドだけを差し替える
 ```
 
-ということ。
-
 重要なのは **全部作り直さない** こと。
 
 ---
 
-# 2. なぜ構造体丸ごと入れ替えが危険か
+## 2. なぜ構造体丸ごと入れ替えが危険か
 
 例えば Format A：
 
@@ -59,13 +54,9 @@ offset 4  jockey
 offset 8  owner
 ```
 
-このとき `owner` だけ変えたいのに、構造体ごとコピーすると：
+`owner` だけ変えたいのに、構造体ごとコピーすると関係ない `jockey` や `birthday` まで壊す可能性がある。
 
-```text
-関係ない jockey や birthday まで壊す可能性がある
-```
-
-だから正しい考え方は：
+正しい考え方は：
 
 ```text
 ownerのoffsetとsizeだけを見て、そこだけmemcpyする
@@ -73,29 +64,21 @@ ownerのoffsetとsizeだけを見て、そこだけmemcpyする
 
 ---
 
-# 3. 設計に必要な3要素
+## 3. 設計に必要な3要素
 
 partial binary patchには最低限この3つが必要。
 
 ```text
-① buffer
-② layout
-③ patch request
-```
-
-それぞれの意味：
-
-```text
-buffer        = 実データ
-layout        = どこに何があるかの地図
-patch request = 何を何に差し替えるか
+① buffer        = 実データ
+② layout        = どこに何があるかの地図
+③ patch request = 何を何に差し替えるか
 ```
 
 ---
 
-# 4. 最小設計
+## 4. 最小設計
 
-まずフィールドID。
+フィールドID：
 
 ```cpp
 enum class FieldID
@@ -106,7 +89,7 @@ enum class FieldID
 };
 ```
 
-フィールド定義。
+フィールド定義：
 
 ```cpp
 struct FieldDescriptor
@@ -116,7 +99,7 @@ struct FieldDescriptor
 };
 ```
 
-layout。
+layout：
 
 ```cpp
 #include <unordered_map>
@@ -124,7 +107,7 @@ layout。
 using LayoutTable = std::unordered_map<FieldID, FieldDescriptor>;
 ```
 
-patch request。
+patch request：
 
 ```cpp
 struct PatchRequest
@@ -137,7 +120,7 @@ struct PatchRequest
 
 ---
 
-# 5. 最小patch関数
+## 5. 最小patch関数
 
 ```cpp
 #include <cstdint>
@@ -202,11 +185,9 @@ bool applyPatch(uint8_t* buffer,
 }
 ```
 
-これが最小の partial binary patch。
-
 ---
 
-# 6. 使用例
+## 6. 使用例
 
 ```cpp
 #include <iostream>
@@ -315,20 +296,13 @@ patch result: 1
 20 24 4 25 9 9 9 9 80 81 82 83
 ```
 
-ownerの4バイトだけ変わっている。
+ownerの4バイトだけが変わっている。
 
 ---
 
-# 7. 設計として一番大事な思想
+## 7. 設計として一番大事な思想
 
-この設計の良いところは：
-
-```text
-patch処理は1個
-layoutだけ差し替える
-```
-
-こと。
+この設計の良いところは「patch処理は1個、layoutだけ差し替える」こと。
 
 Format A：
 
@@ -359,9 +333,9 @@ applyPatch(buffer, bufferSize, layoutB, request);
 
 ---
 
-# 8. 現場設計ではさらに必要なもの
+## 8. 実務設計で追加すべき検証
 
-実務では最低限、次も入れる。
+実務では最低限、次を入れる。
 
 ```text
 ① buffer範囲チェック
@@ -373,19 +347,17 @@ applyPatch(buffer, bufferSize, layoutB, request);
 ⑦ パッチ前後の差分確認
 ```
 
-特に危険なのはここ：
+特に危険な箇所：
 
 ```cpp
 std::memcpy(buffer + desc.offset, request.newData, desc.size);
 ```
 
-この1行は強力だけど、間違えると普通にデータを壊す。
-
-だから事前チェックが必須。
+この1行は強力だが、事前チェックなしで使うとデータを破壊する可能性がある。
 
 ---
 
-# 9. より実務寄りの関数
+## 9. より実務寄りの関数
 
 ```cpp
 bool applyPatchSafe(uint8_t* buffer,
@@ -441,43 +413,25 @@ bool applyPatchSafe(uint8_t* buffer,
 }
 ```
 
-地味だけど、これが現場で信用されるコード。
-
 ---
 
-# 10. 今回の問題を一文で説明するなら
+## まとめ
 
-リーダーに説明するなら、こう言えばよい。
-
-```text
-構造体全体を差し替えるのではなく、フォーマットごとのlayout descriptorを用意し、
-field IDからoffset/sizeを引いて、該当範囲だけをmemcpyでpatchする設計にします。
-これにより、レイアウト差異をpatch処理から分離できます。
-```
-
-これが言えれば、理解している人に見える。
-
----
-
-# Phase5の結論
-
-今回の問題の正体はこれ：
+この設計が解決する問題：
 
 ```text
 bufferを直接書き換える問題ではなく、
 layout差異を吸収しながら安全に部分更新する設計問題
 ```
 
-だから設計の中心は：
+設計の中心：
 
 ```text
 structではなくlayout descriptor
 ```
 
-そして処理の中心は：
+処理の中心：
 
 ```text
 offset + size + memcpy
 ```
-
-です。
